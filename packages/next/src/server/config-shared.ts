@@ -147,6 +147,7 @@ export type TurbopackModuleType =
   | 'raw'
   | 'node'
   | 'bytes'
+  | 'text'
 
 export type TurbopackRuleConfigItem = {
   /** Loaders to apply to matched files. */
