@@ -1086,5 +1086,16 @@
   "1085": "Route \"%s\": Runtime data such as \\`cookies()\\`, \\`headers()\\`, \\`params\\`, or \\`searchParams\\` was accessed inside \\`generateMetadata\\` or you have file-based metadata such as icons that depend on dynamic params segments. Except for this instance, the page would have been entirely prerenderable which may have been the intended behavior. See more info here: https://nextjs.org/docs/messages/next-prerender-dynamic-metadata",
   "1086": "Route \"%s\": %s This delays the entire page from rendering, resulting in a slow user experience. Learn more: https://nextjs.org/docs/messages/next-prerender-dynamic-viewport",
   "1087": "Failed to parse \"%s\":\\n%s%s",
-  "1088": "Expected RSC navigation response to have a body"
+  "1088": "Expected RSC navigation response to have a body",
+  "1089": "Route \"%s\" accessed searchParam \"%s\" which is not defined in the \\`samples\\` of \\`unstable_instant\\`. Add it to the sample's \\`searchParams\\` object, or \\`{ \"%s\": undefined }\\` if it should be absent.",
+  "1090": "Draft mode cannot be enabled during build-time instant validation.",
+  "1091": "Build-time instant validation failed for route \"%s\"%s:\\n%s",
+  "1092": "Draft mode cannot be disabled during build-time instant validation.",
+  "1093": "Route \"%s\" accessed param \"%s\" which is not defined in the \\`samples\\` of \\`unstable_instant\\`. Add it to the sample's \\`params\\` object.",
+  "1094": "Route \"%s\" accessed %s \"%s\" which is not defined in the \\`samples\\` of \\`unstable_instant\\`. Add it to the sample's \\`%s\\` array%s",
+  "1095": "An unexpected error occcured during instant validation",
+  "1096": "Route \"%s\" accessed searchParam \"%s\" which is not defined in the \\`samples\\` of \\`unstable_instant\\`. Add it to the sample's \\`searchParams\\` object, or \\`{ \"%s\": null }\\` if it should be absent.",
+  "1097": "createPrerenderParamsForClientSegment should not be called in validation contexts.",
+  "1098": "Stopping prerender due to instant validation errors.",
+  "1099": "createServerParamsForServerSegment should not be called in client contexts."
 }
