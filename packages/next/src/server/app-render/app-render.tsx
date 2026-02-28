@@ -4128,6 +4128,7 @@ async function spawnStaticShellValidationInDevImpl(
       debugChunks,
       startTime,
       rootParams,
+      fallbackRouteParams,
       ctx,
       hmrRefreshHash,
       validationSamples
@@ -4210,6 +4211,7 @@ async function warmupClientModulesForStagedValidationInDev(
       // We're not rendering any validation boundaries yet.
       boundaryState: null,
       validationSamples,
+      fallbackRouteParams,
     }
     initialClientPrerenderStore = store
   }
@@ -4477,6 +4479,7 @@ async function validateInstantConfigs(
   debugChunks: null | Array<Uint8Array>,
   startTime: number,
   rootParams: Params,
+  fallbackRouteParams: OpaqueFallbackRouteParams | null,
   ctx: AppRenderContext,
   hmrRefreshHash: string | undefined,
   validationSamples: ValidationStoreClient['validationSamples'] | null
@@ -4555,6 +4558,7 @@ async function validateInstantConfigs(
         startTime,
         stageEndTimes,
         rootParams,
+        fallbackRouteParams,
         ctx,
         hmrRefreshHash,
         validationRouteTree,
@@ -4576,6 +4580,7 @@ async function validateInstantConfigs(
             startTime,
             stageEndTimes,
             rootParams,
+            fallbackRouteParams,
             ctx,
             hmrRefreshHash,
             validationRouteTree,
@@ -4967,7 +4972,7 @@ async function validateInstantConfigsInBuild(
     const validationCtx: AppRenderContext = {
       ...ctx,
       interpolatedParams: sampleParams,
-      // url
+      url: parseRelativeUrl(route + search, undefined, false),
       getDynamicParamFromSegment,
       query,
     }
@@ -5071,6 +5076,7 @@ async function validateInstantConfigsInBuild(
       null, // debugChunks
       startTime,
       sampleRootParams,
+      fallbackRouteParams,
       validationCtx,
       undefined, // hmrRefreshHash,
       validationSamples
@@ -5093,6 +5099,7 @@ async function validateInstantConfigNavigation(
   startTime: number,
   stageEndTimes: InstantValidation.StageEndTimes,
   rootParams: Params,
+  fallbackRouteParams: OpaqueFallbackRouteParams | null,
   ctx: AppRenderContext,
   hmrRefreshHash: string | undefined,
   routeTree: InstantValidation.RouteTree,
@@ -5140,6 +5147,7 @@ async function validateInstantConfigNavigation(
     varyParamsAccumulator: null,
     boundaryState,
     validationSamples,
+    fallbackRouteParams,
   }
 
   const clientReferenceManifest = getClientReferenceManifest()
