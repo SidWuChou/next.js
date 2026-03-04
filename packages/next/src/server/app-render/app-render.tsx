@@ -841,7 +841,7 @@ async function generateStagedDynamicFlightRenderResult(
     void cacheSignal
       .cacheReady()
       .then(() =>
-        spawnRuntimePrefetchDuringNavigation(
+        spawnRuntimePrefetchWithFilledCaches(
           runtimePrefetchTransform.writable,
           ctx,
           prerenderResumeDataCache,
@@ -901,7 +901,7 @@ async function generateStagedDynamicFlightRenderResult(
  * pipes its output into the provided writable stream. The caller is responsible
  * for waiting until caches are warm before calling this function.
  */
-async function spawnRuntimePrefetchDuringNavigation(
+async function spawnRuntimePrefetchWithFilledCaches(
   writable: WritableStream<Uint8Array>,
   ctx: AppRenderContext,
   prerenderResumeDataCache: PrerenderResumeDataCache,
@@ -1613,9 +1613,15 @@ async function getRSCPayload(
     is404: boolean
     staleTimeIterable?: AsyncIterable<number>
     staticStageByteLengthPromise?: Promise<number>
+    runtimePrefetchStream?: ReadableStream<Uint8Array>
   }
 ): Promise<InitialRSCPayload & { P: ReactNode }> {
-  const { is404, staleTimeIterable, staticStageByteLengthPromise } = options
+  const {
+    is404,
+    staleTimeIterable,
+    staticStageByteLengthPromise,
+    runtimePrefetchStream,
+  } = options
   const injectedCSS = new Set<string>()
   const injectedJS = new Set<string>()
   const injectedFontPreloadTags = new Set<string>()
@@ -1751,6 +1757,7 @@ async function getRSCPayload(
     h: getMetadataVaryParamsThenable(),
     s: staleTimeIterable,
     l: staticStageByteLengthPromise,
+    p: runtimePrefetchStream,
   })
 }
 
@@ -2994,6 +3001,39 @@ async function renderToStream(
           resolveStaticStageByteLength = resolve
         })
 
+        // If the route has runtime prefetching enabled, spawn a runtime
+        // prerender after the resume render fills caches. The result is
+        // embedded in the initial RSC payload so the client can cache
+        // runtime-prefetchable content during hydration.
+        const hasRuntimePrefetch =
+          await anySegmentHasRuntimePrefetchEnabled(tree)
+
+        let runtimePrefetchStream: ReadableStream<Uint8Array> | undefined
+
+        if (hasRuntimePrefetch) {
+          const prerenderResumeDataCache = createPrerenderResumeDataCache()
+          requestStore.prerenderResumeDataCache = prerenderResumeDataCache
+
+          const cacheSignal = new CacheSignal()
+          trackPendingModules(cacheSignal)
+          requestStore.cacheSignal = cacheSignal
+
+          const runtimePrefetchTransform = new TransformStream<Uint8Array>()
+          runtimePrefetchStream = runtimePrefetchTransform.readable
+
+          void cacheSignal
+            .cacheReady()
+            .then(() =>
+              spawnRuntimePrefetchWithFilledCaches(
+                runtimePrefetchTransform.writable,
+                ctx,
+                prerenderResumeDataCache,
+                requestStore,
+                serverComponentsErrorHandler
+              )
+            )
+        }
+
         const RSCPayload = await workUnitAsyncStorage.run(
           requestStore,
           getRSCPayload,
@@ -3003,6 +3043,7 @@ async function renderToStream(
             is404: res.statusCode === 404,
             staleTimeIterable,
             staticStageByteLengthPromise,
+            runtimePrefetchStream,
           }
         )
 
