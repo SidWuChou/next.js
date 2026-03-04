@@ -56,4 +56,7 @@ export default globalIgnores([
   'test/e2e/app-dir/app-external/app/mixed/import/mixed-mod.mjs',
   'turbopack/crates/*/tests/**/*',
   'turbopack/crates/*/js/src/compiled',
+  // Eval fixtures are deliberately imperfect code for agents to fix; EVAL.ts
+  // uses vitest (not jest) and comes from an external repo.
+  'evals/evals/**/*',
 ])
