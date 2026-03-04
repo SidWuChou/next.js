@@ -3923,7 +3923,7 @@ async function logMessagesAndSendErrorsToBrowser(
       { filterStackFrame }
     )
 
-    sendErrorsToBrowser(toReadableStream(errorsFlightStream), htmlRequestId)
+    sendErrorsToBrowser(errorsFlightStream, htmlRequestId)
   }
 }
 
