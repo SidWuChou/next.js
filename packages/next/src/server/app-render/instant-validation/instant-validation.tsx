@@ -477,15 +477,14 @@ export async function collectStagedSegmentData(
     await Promise.all([
       // accumulate Flight chunks
       (async () => {
-        for await (const chunk of itemStream as AsyncIterable<Uint8Array>) {
+        for await (const chunk of itemStream) {
           writeChunk(cacheEntry.chunks, controller.currentStage, chunk)
         }
       })(),
       // accumulate Debug chunks
       segmentDebugChannel &&
         (async () => {
-          for await (const chunk of segmentDebugChannel.clientSide
-            .readable as AsyncIterable<Uint8Array>) {
+          for await (const chunk of segmentDebugChannel.clientSide.readable) {
             cacheEntry.debugChunks!.push(chunk)
           }
         })(),
@@ -712,7 +711,7 @@ export async function createCombinedPayloadStream(
       streamFinished = Promise.all([
         // Accumulate Flight chunks
         (async () => {
-          for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+          for await (const chunk of stream) {
             allChunks.push(chunk)
             if (isRenderable) {
               renderableChunks.push(chunk)
@@ -722,8 +721,7 @@ export async function createCombinedPayloadStream(
         // Accumulate debug chunks
         debugChannel &&
           (async () => {
-            for await (const chunk of debugChannel.clientSide
-              .readable as AsyncIterable<Uint8Array>) {
+            for await (const chunk of debugChannel.clientSide.readable) {
               debugChunks!.push(chunk)
             }
           })(),
