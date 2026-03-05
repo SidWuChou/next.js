@@ -169,6 +169,9 @@ export function getDefineEnv({
       config.experimental.appNewScrollHandler
     ),
     'process.env.__NEXT_CACHE_COMPONENTS': isCacheComponentsEnabled,
+    'process.env.__NEXT_EXPERIMENTAL_CACHED_NAVIGATIONS': Boolean(
+      config.experimental.cachedNavigations
+    ),
     'process.env.__NEXT_INSTANT_NAV_TOGGLE':
       !!config.experimental.instantNavigationDevToolsToggle,
     'process.env.__NEXT_USE_CACHE': isUseCacheEnabled,

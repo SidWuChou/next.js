@@ -351,6 +351,7 @@ export interface ExperimentalConfig {
    * rewrites will get the rewrite headers.
    */
   clientParamParsingOrigins?: string[]
+  cachedNavigations?: boolean
   dynamicOnHover?: boolean
   optimisticRouting?: boolean
   varyParams?: boolean
@@ -1640,6 +1641,7 @@ export const defaultConfig = Object.freeze({
     linkNoTouchStart: false,
     caseSensitiveRoutes: false,
     clientParamParsingOrigins: undefined,
+    cachedNavigations: false,
     dynamicOnHover: false,
     varyParams: false,
     prefetchInlining: false,
@@ -1819,6 +1821,7 @@ export interface NextConfigRuntime {
     | 'runtimeServerDeploymentId'
     | 'maxPostponedStateSize'
     | 'devCacheControlNoCache'
+    | 'cachedNavigations'
     | 'exposeTestingApiInProductionBuild'
     | 'immutableAssetToken'
   > & {
@@ -1888,6 +1891,7 @@ export function getNextConfigRuntime(
         runtimeServerDeploymentId: ex.runtimeServerDeploymentId,
         maxPostponedStateSize: ex.maxPostponedStateSize,
         devCacheControlNoCache: ex.devCacheControlNoCache,
+        cachedNavigations: ex.cachedNavigations,
         exposeTestingApiInProductionBuild: ex.exposeTestingApiInProductionBuild,
         immutableAssetToken: ex.immutableAssetToken,
 

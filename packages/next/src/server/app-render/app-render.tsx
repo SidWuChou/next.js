@@ -2040,6 +2040,8 @@ async function renderToHTMLOrFlightImpl(
     setIsrStatus,
   } = renderOpts
 
+  const { cachedNavigations } = renderOpts.experimental
+
   // We need to expose the bundled `require` API globally for
   // react-server-dom-webpack. This is a hack until we find a better way.
   if (ComponentMod.__next_app__) {
@@ -2405,7 +2407,7 @@ async function renderToHTMLOrFlightImpl(
             createRequestStore,
             fallbackParams
           )
-        } else if (cacheComponents) {
+        } else if (cacheComponents && cachedNavigations) {
           return generateStagedDynamicFlightRenderResult(req, ctx, requestStore)
         } else {
           return generateDynamicFlightRenderResult(req, ctx, requestStore)
@@ -2723,6 +2725,8 @@ async function renderToStream(
     cacheComponents,
   } = renderOpts
 
+  const { cachedNavigations } = renderOpts.experimental
+
   const { ServerInsertedHTMLProvider, renderServerInsertedHTML } =
     createServerInsertedHTML()
   const getServerInsertedMetadata = createServerInsertedMetadata(nonce)
@@ -2969,10 +2973,11 @@ async function renderToStream(
             requestId
           )
         }
-      } else if (cacheComponents) {
-        // Production Cache Components: use staged rendering so the RSC payload
-        // includes the static stage byte length (`l` field), enabling the
-        // client to cache the static subset during hydration.
+      } else if (cacheComponents && cachedNavigations) {
+        // Production Cache Components + Cached Navigations: use staged
+        // rendering so the RSC payload includes the static stage byte length
+        // (`l` field), enabling the client to cache the static subset during
+        // hydration.
         const { renderToReadableStream } = ctx.componentMod
 
         const selectStaleTime = createSelectStaleTime(experimental)
@@ -4816,6 +4821,8 @@ async function prerenderToStream(
     cacheComponents,
   } = renderOpts
 
+  const { cachedNavigations } = renderOpts.experimental
+
   const allowEmptyStaticShell =
     (renderOpts.allowEmptyStaticShell ?? false) ||
     (await isPageAllowedToBlock(tree))
@@ -5297,8 +5304,11 @@ async function prerenderToStream(
         { is404: res.statusCode === 404 }
       )
 
-      const staleTimeIterable = new StaleTimeIterable()
-      finalAttemptRSCPayload.s = staleTimeIterable
+      let staleTimeIterable: StaleTimeIterable | undefined
+      if (cachedNavigations) {
+        staleTimeIterable = new StaleTimeIterable()
+        finalAttemptRSCPayload.s = staleTimeIterable
+      }
 
       const serverDynamicTracking = createDynamicTrackingState(
         isDebugDynamicAccesses
@@ -5327,11 +5337,13 @@ async function prerenderToStream(
         varyParamsAccumulator,
       })
 
-      trackStaleTime(
-        finalServerPrerenderStore,
-        staleTimeIterable,
-        selectStaleTime
-      )
+      if (staleTimeIterable !== undefined) {
+        trackStaleTime(
+          finalServerPrerenderStore,
+          staleTimeIterable,
+          selectStaleTime
+        )
+      }
 
       let prerenderIsPending = true
       const finalRSCPrerenderOptions = {
@@ -5352,10 +5364,13 @@ async function prerenderToStream(
         // We resolve these directly here instead of reading from the work
         // unit store because this callback runs in a separate task (via
         // setTimeout) and may not have access to the async storage context.
-        await Promise.all([
-          finishStaleTimeTracking(staleTimeIterable),
+        const pendingFinishes: Promise<void>[] = [
           finishAccumulatingVaryParams(varyParamsAccumulator),
-        ])
+        ]
+        if (staleTimeIterable !== undefined) {
+          pendingFinishes.push(finishStaleTimeTracking(staleTimeIterable))
+        }
+        await Promise.all(pendingFinishes)
 
         if (finalServerReactController.signal.aborted) {
           // If the server controller is already aborted we must have called something
@@ -5526,11 +5541,16 @@ async function prerenderToStream(
       })
 
       metadata.flightData = await streamToBuffer(
-        prependIsPartialByte(reactServerResult.asStream(), serverIsDynamic)
+        cachedNavigations
+          ? prependIsPartialByte(reactServerResult.asStream(), serverIsDynamic)
+          : reactServerResult.asStream()
       )
 
       // collectSegmentData needs the raw flight data without the marker byte.
-      const flightData = metadata.flightData.subarray(1)
+      const flightData = cachedNavigations
+        ? metadata.flightData.subarray(1)
+        : metadata.flightData
+
       metadata.segmentData = await collectSegmentData(
         flightData,
         finalServerPrerenderStore,
