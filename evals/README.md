@@ -4,6 +4,12 @@ Agent evals for Next.js. Each eval is a small Next.js app + a prompt + assertion
 
 The point: find places where agents get Next.js wrong because their training data is stale, then fix it by shipping better docs in the `next` package itself.
 
+## How it works
+
+The runner is [`@vercel/agent-eval`](https://github.com/vercel-labs/agent-eval). It spins up a sandbox (Vercel or local Docker), copies the fixture in, runs the coding agent against `PROMPT.md`, then executes `EVAL.ts` as a vitest file against whatever the agent wrote. The `PROMPT.md` / `EVAL.ts` / fixture-dir convention you'll see below is that package's convention — see its README for the full spec.
+
+`run-evals.js` is a thin wrapper around it: pack the local `next` build into a tarball, generate two experiment configs (`baseline` and `agents-md`) that differ only in whether they drop an `AGENTS.md` pointing at the bundled docs, then invoke `agent-eval run-all`. Everything from "spawn sandbox" onward is `@vercel/agent-eval`'s job.
+
 ## One-time setup
 
 Vercel employees: request access to the `vercel-labs` team in Lumos, then:
@@ -104,10 +110,10 @@ Sandbox tokens live in `.env.local` at the repo root (from `vc env pull`).
 
 ## Running without Vercel sandbox access
 
-If you don't have Vercel credentials, the runner falls back to local Docker. Have Docker running and provide your own model key in `.env.local` at the repo root:
+If you don't have Vercel credentials, `@vercel/agent-eval` falls back to local Docker — see [its direct API keys docs](https://github.com/vercel-labs/agent-eval#direct-api-keys-no-vercel-account-required) for the full list of supported env vars. Have Docker running and provide your own model key in `.env.local` at the repo root:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Then run `pnpm eval <name>` as normal. Docker pulls `node:24-slim` on first run. Tarball packing, both variants, and the results layout are identical to the remote path.
+Then run `pnpm eval <name>` as normal. Docker pulls `node:24-slim` on first run. Tarball packing, both variants, and the results layout are identical to the remote path — `run-evals.js` doesn't know or care which sandbox backend got picked.

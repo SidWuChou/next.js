@@ -97,66 +97,54 @@ export default config
   }
 }
 
-/** @param {string[]} argv */
-function parseArgs(argv) {
-  const flags = argv.filter((a) => a.startsWith('-'))
-  const positional = argv.filter((a) => !a.startsWith('-'))
-  const showUsage = (stream = 'error') => {
-    const available = fs
-      .readdirSync(FIXTURES_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => `  ${d.name}`)
-      .join('\n')
-    const out =
-      `Usage: pnpm eval <eval-name> [--dry]\n` +
-      `       pnpm eval --all\n\n` +
-      `Available evals:\n${available}`
-    if (stream === 'stdout') {
-      console.log(out)
-    } else {
-      console.error(out)
-    }
-  }
-
-  if (flags.includes('--help') || flags.includes('-h')) {
-    showUsage('stdout')
-    process.exit(0)
-  }
-
-  if (flags.includes('--all')) {
-    if (positional.length > 0) {
-      console.error(
-        `Unexpected positional args with --all: ${positional.join(' ')}`
-      )
-      showUsage('error')
-      process.exit(1)
-    }
-    return {
-      evalName: null,
-      forward: flags.filter((f) => f !== '--all'),
-    }
-  }
-  if (positional.length === 0) {
-    showUsage('error')
-    process.exit(1)
-  }
-  if (positional.length > 1) {
-    console.error(
-      `Expected exactly one eval name, got: ${positional.join(' ')}`
-    )
-    showUsage('error')
-    process.exit(1)
-  }
-  const evalName = positional[0]
-  if (!fs.existsSync(path.join(FIXTURES_DIR, evalName))) {
-    console.error(`Unknown eval: ${evalName}\n(looked in ${FIXTURES_DIR})`)
-    process.exit(1)
-  }
-  return { evalName, forward: flags }
+function listEvals() {
+  return fs
+    .readdirSync(FIXTURES_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
 }
 
 function main() {
-  const { evalName, forward } = parseArgs(process.argv.slice(2))
+  const argv = require('yargs/yargs')(process.argv.slice(2))
+    .command(
+      '$0 [eval-name]',
+      'Run an eval (baseline + agents-md variants)',
+      (y) =>
+        y.positional('eval-name', {
+          type: 'string',
+          describe: 'Fixture directory name',
+        })
+    )
+    .boolean('all')
+    .describe('all', 'Run every eval (slow — normally only CI does this)')
+    .boolean('dry')
+    .describe('dry', 'Preview without executing')
+    .conflicts('all', 'eval-name')
+    .check((argv) => {
+      if (!argv.all && !argv.evalName) {
+        throw new Error(
+          `Missing <eval-name>.\n\nAvailable evals:\n${listEvals()
+            .map((n) => `  ${n}`)
+            .join('\n')}`
+        )
+      }
+      if (
+        argv.evalName &&
+        !fs.existsSync(path.join(FIXTURES_DIR, argv.evalName))
+      ) {
+        throw new Error(
+          `Unknown eval: ${argv.evalName}\n(looked in ${FIXTURES_DIR})`
+        )
+      }
+      return true
+    })
+    .strict()
+    .help().argv
+
+  /** @type {string | null} */
+  const evalName = argv.all ? null : /** @type {string} */ (argv.evalName)
+  // Flags not consumed here are forwarded to agent-eval.
+  const forward = argv.dry ? ['--dry'] : []
 
   if (!fs.existsSync(path.join(ROOT, 'packages/next/dist'))) {
     console.error(
