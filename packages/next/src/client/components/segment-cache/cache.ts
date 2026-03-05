@@ -2015,7 +2015,7 @@ export async function fetchInlinedSegmentsOnCacheMiss(
   const headers: RequestHeaders = {
     [RSC_HEADER]: '1',
     [NEXT_ROUTER_PREFETCH_HEADER]: '1',
-    [NEXT_ROUTER_SEGMENT_PREFETCH_HEADER]: '/_inlined',
+    [NEXT_ROUTER_SEGMENT_PREFETCH_HEADER]: '/' + PAGE_SEGMENT_KEY,
   }
   if (nextUrl !== null) {
     headers[NEXT_URL] = nextUrl
@@ -2936,6 +2936,62 @@ export function writeStaticStageResponseIntoCache(
     navigationSeed,
     null // spawnedEntries — no pre-created entries; will create or upsert
   )
+}
+
+/**
+ * Decodes an embedded runtime prefetch Flight stream, normalizes the flight
+ * data, and derives a `NavigationSeed` from the base tree.
+ *
+ * Returns `null` if the response triggers an MPA navigation.
+ */
+export async function processRuntimePrefetchStream(
+  now: number,
+  runtimePrefetchStream: ReadableStream<Uint8Array>,
+  baseTree: FlightRouterState,
+  renderedSearch: string
+): Promise<{
+  flightDatas: NormalizedFlightData[]
+  navigationSeed: NavigationSeed
+  buildId: string | undefined
+  isResponsePartial: boolean
+  headVaryParams: VaryParams | null
+  staleAt: number
+} | null> {
+  const { stream, isPartial } = await stripIsPartialByte(runtimePrefetchStream)
+
+  const serverData =
+    await createFromNextReadableStream<NavigationFlightResponse>(
+      stream,
+      undefined,
+      { allowPartialStream: true }
+    )
+
+  const headVaryParamsThenable = serverData.h
+  const headVaryParams =
+    headVaryParamsThenable !== null
+      ? readVaryParams(headVaryParamsThenable)
+      : null
+
+  const staleAt = await getStaleAt(now, serverData.s)
+
+  const flightDatas = normalizeFlightData(serverData.f)
+  if (typeof flightDatas === 'string') {
+    return null
+  }
+  const navigationSeed = convertServerPatchToFullTree(
+    baseTree,
+    flightDatas,
+    renderedSearch
+  )
+
+  return {
+    flightDatas,
+    navigationSeed,
+    buildId: serverData.b,
+    isResponsePartial: isPartial,
+    headVaryParams,
+    staleAt,
+  }
 }
 
 /**

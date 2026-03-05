@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use either::Either;
 use strsim::jaro;
 use swc_core::{
@@ -49,7 +49,7 @@ use crate::{
         util::throw_module_not_found_expr,
     },
     runtime_functions::{TURBOPACK_EXTERNAL_IMPORT, TURBOPACK_EXTERNAL_REQUIRE, TURBOPACK_IMPORT},
-    tree_shake::{TURBOPACK_PART_IMPORT_SOURCE, asset::EcmascriptModulePartAsset},
+    tree_shake::{TURBOPACK_PART_IMPORT_SOURCE, part::module::EcmascriptModulePartAsset},
     utils::module_id_to_lit,
 };
 
@@ -513,10 +513,7 @@ impl ModuleReference for EsmAssetReference {
                 } else if chunking_type == "none" {
                     None
                 } else {
-                    return Err(anyhow!(
-                        "unknown chunking_type: {}",
-                        chunking_type.to_string_lossy()
-                    ));
+                    bail!("unknown chunking_type: {}", chunking_type.to_string_lossy());
                 }
             } else {
                 Some(ChunkingType::Parallel {
