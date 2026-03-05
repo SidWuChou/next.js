@@ -1132,9 +1132,9 @@ async function generateDynamicFlightRenderResultWithStagesInDev(
     if (shouldValidate) {
       let validationDebugChannelClient: Readable | undefined = undefined
       if (returnedDebugChannel) {
-        const [t1, t2] = returnedDebugChannel.clientSide.readable.tee()
+        const [t1, t2] = teeStream(returnedDebugChannel.clientSide.readable)
         returnedDebugChannel.clientSide.readable = t1
-        validationDebugChannelClient = nodeStreamFromReadableStream(t2)
+        validationDebugChannelClient = t2 as Readable
       }
       consoleAsyncStorage.run(
         { dim: true },
@@ -1897,7 +1897,7 @@ function App<T>({
 }: {
   /* eslint-disable @next/internal/no-ambiguous-jsx -- React Client */
   reactServerStream: Readable | BinaryStreamOf<T>
-  reactDebugStream: Readable | ReadableStream<Uint8Array> | undefined
+  reactDebugStream: AnyStream | undefined
   debugEndTime: number | undefined
   preinitScripts: () => void
   ServerInsertedHTMLProvider: ComponentType<{
@@ -2843,7 +2843,7 @@ async function renderToStream(
     )
 
     let reactServerResult: null | ReactServerResult = null
-    let reactDebugStream: ReadableStream<Uint8Array> | undefined
+    let reactDebugStream: AnyStream | undefined
 
     const setHeader = res.setHeader.bind(res)
     const appendHeader = res.appendHeader.bind(res)
@@ -2915,9 +2915,9 @@ async function renderToStream(
 
           let validationDebugChannelClient: Readable | undefined = undefined
           if (returnedDebugChannel) {
-            const [t1, t2] = returnedDebugChannel.clientSide.readable.tee()
+            const [t1, t2] = teeStream(returnedDebugChannel.clientSide.readable)
             returnedDebugChannel.clientSide.readable = t1
-            validationDebugChannelClient = nodeStreamFromReadableStream(t2)
+            validationDebugChannelClient = t2 as Readable
           }
 
           consoleAsyncStorage.run(
@@ -2960,8 +2960,9 @@ async function renderToStream(
         }
 
         if (debugChannel && setReactDebugChannel) {
-          const [readableSsr, readableBrowser] =
-            debugChannel.clientSide.readable.tee()
+          const [readableSsr, readableBrowser] = teeStream(
+            debugChannel.clientSide.readable
+          )
 
           reactDebugStream = readableSsr
 
@@ -3057,8 +3058,9 @@ async function renderToStream(
         const debugChannel = setReactDebugChannel && createDebugChannel()
 
         if (debugChannel) {
-          const [readableSsr, readableBrowser] =
-            debugChannel.clientSide.readable.tee()
+          const [readableSsr, readableBrowser] = teeStream(
+            debugChannel.clientSide.readable
+          )
 
           reactDebugStream = readableSsr
 
@@ -6153,31 +6155,4 @@ function WarnForBypassCachesInDev({ route }: { route: string }) {
     `Route ${route} is rendering with server caches disabled. For this navigation, Component Metadata in React DevTools will not accurately reflect what is statically prerenderable and runtime prefetchable. See more info here: https://nextjs.org/docs/messages/cache-bypass-in-dev`
   )
   return null
-}
-
-function nodeStreamFromReadableStream<T>(stream: ReadableStream<T>) {
-  if (process.env.NEXT_RUNTIME === 'edge') {
-    throw new InvariantError(
-      'nodeStreamFromReadableStream cannot be used in the edge runtime'
-    )
-  } else {
-    const reader = stream.getReader()
-
-    const { Readable } = require('node:stream') as typeof import('node:stream')
-
-    return new Readable({
-      read() {
-        reader
-          .read()
-          .then(({ done, value }) => {
-            if (done) {
-              this.push(null)
-            } else {
-              this.push(value)
-            }
-          })
-          .catch((err) => this.destroy(err))
-      },
-    })
-  }
 }
