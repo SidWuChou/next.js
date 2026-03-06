@@ -1532,6 +1532,279 @@ describe('instant validation', () => {
       })
     })
 
+    describe('route groups', () => {
+      it('invalid - config on route group layout - cookies() blocks below', async () => {
+        const browser = await navigateTo(
+          '/suspense-in-root/static/route-group-config-only'
+        )
+        await expect(browser).toDisplayCollapsedRedbox(`
+         {
+           "cause": [
+             {
+               "label": "Caused by: Instant Validation",
+               "source": "app/suspense-in-root/static/route-group-config-only/(group)/layout.tsx (3:33) @ unstable_instant
+         > 3 | export const unstable_instant = { prefetch: 'static' }
+             |                                 ^",
+               "stack": [
+                 "unstable_instant app/suspense-in-root/static/route-group-config-only/(group)/layout.tsx (3:33)",
+                 "Set.forEach <anonymous>",
+               ],
+             },
+           ],
+           "code": "E1078",
+           "description": "Runtime data was accessed outside of <Suspense>
+
+         This delays the entire page from rendering, resulting in a slow user experience. Next.js uses this error to ensure your app loads instantly on every navigation. cookies(), headers(), and searchParams, are examples of Runtime data that can only come from a user request.
+
+         To fix this:
+
+         Provide a fallback UI using <Suspense> around this component.
+
+         or
+
+         Move the Runtime data access into a deeper component wrapped in <Suspense>.
+
+         In either case this allows Next.js to stream its contents to the user when they request the page, while still providing an initial UI that is prerendered and prefetchable for instant navigations.
+
+         Learn more: https://nextjs.org/docs/messages/blocking-route",
+           "environmentLabel": "Server",
+           "label": "Blocking Route",
+           "source": "app/suspense-in-root/static/route-group-config-only/(group)/page.tsx (4:16) @ Page
+         > 4 |   await cookies()
+             |                ^",
+           "stack": [
+             "Page app/suspense-in-root/static/route-group-config-only/(group)/page.tsx (4:16)",
+           ],
+         }
+        `)
+      })
+
+      it('invalid - config on both route group and segment layout - cookies() blocks below', async () => {
+        const browser = await navigateTo(
+          '/suspense-in-root/static/route-group-config-and-segment-config'
+        )
+        await expect(browser).toDisplayCollapsedRedbox(`
+         {
+           "cause": [
+             {
+               "label": "Caused by: Instant Validation",
+               "source": "app/suspense-in-root/static/route-group-config-and-segment-config/(group)/layout.tsx (3:33) @ unstable_instant
+         > 3 | export const unstable_instant = { prefetch: 'static' }
+             |                                 ^",
+               "stack": [
+                 "unstable_instant app/suspense-in-root/static/route-group-config-and-segment-config/(group)/layout.tsx (3:33)",
+                 "Set.forEach <anonymous>",
+               ],
+             },
+           ],
+           "code": "E1078",
+           "description": "Runtime data was accessed outside of <Suspense>
+
+         This delays the entire page from rendering, resulting in a slow user experience. Next.js uses this error to ensure your app loads instantly on every navigation. cookies(), headers(), and searchParams, are examples of Runtime data that can only come from a user request.
+
+         To fix this:
+
+         Provide a fallback UI using <Suspense> around this component.
+
+         or
+
+         Move the Runtime data access into a deeper component wrapped in <Suspense>.
+
+         In either case this allows Next.js to stream its contents to the user when they request the page, while still providing an initial UI that is prerendered and prefetchable for instant navigations.
+
+         Learn more: https://nextjs.org/docs/messages/blocking-route",
+           "environmentLabel": "Server",
+           "label": "Blocking Route",
+           "source": "app/suspense-in-root/static/route-group-config-and-segment-config/(group)/page.tsx (4:16) @ Page
+         > 4 |   await cookies()
+             |                ^",
+           "stack": [
+             "Page app/suspense-in-root/static/route-group-config-and-segment-config/(group)/page.tsx (4:16)",
+           ],
+         }
+        `)
+      })
+
+      it('invalid - config on segment layout - cookies() blocks through route group below', async () => {
+        const browser = await navigateTo(
+          '/suspense-in-root/static/route-group-segment-config-only'
+        )
+        await expect(browser).toDisplayCollapsedRedbox(`
+         {
+           "cause": [
+             {
+               "label": "Caused by: Instant Validation",
+               "source": "app/suspense-in-root/static/route-group-segment-config-only/layout.tsx (3:33) @ unstable_instant
+         > 3 | export const unstable_instant = { prefetch: 'static' }
+             |                                 ^",
+               "stack": [
+                 "unstable_instant app/suspense-in-root/static/route-group-segment-config-only/layout.tsx (3:33)",
+                 "Set.forEach <anonymous>",
+               ],
+             },
+           ],
+           "code": "E1078",
+           "description": "Runtime data was accessed outside of <Suspense>
+
+         This delays the entire page from rendering, resulting in a slow user experience. Next.js uses this error to ensure your app loads instantly on every navigation. cookies(), headers(), and searchParams, are examples of Runtime data that can only come from a user request.
+
+         To fix this:
+
+         Provide a fallback UI using <Suspense> around this component.
+
+         or
+
+         Move the Runtime data access into a deeper component wrapped in <Suspense>.
+
+         In either case this allows Next.js to stream its contents to the user when they request the page, while still providing an initial UI that is prerendered and prefetchable for instant navigations.
+
+         Learn more: https://nextjs.org/docs/messages/blocking-route",
+           "environmentLabel": "Server",
+           "label": "Blocking Route",
+           "source": "app/suspense-in-root/static/route-group-segment-config-only/(group)/page.tsx (4:16) @ Page
+         > 4 |   await cookies()
+             |                ^",
+           "stack": [
+             "Page app/suspense-in-root/static/route-group-segment-config-only/(group)/page.tsx (4:16)",
+           ],
+         }
+        `)
+      })
+
+      it('invalid - config on route group layout - cookies() blocks in deeper segment', async () => {
+        const browser = await navigateTo(
+          '/suspense-in-root/static/route-group-config-with-deeper-segment/inner'
+        )
+        await expect(browser).toDisplayCollapsedRedbox(`
+         {
+           "cause": [
+             {
+               "label": "Caused by: Instant Validation",
+               "source": "app/suspense-in-root/static/route-group-config-with-deeper-segment/(group)/layout.tsx (3:33) @ unstable_instant
+         > 3 | export const unstable_instant = { prefetch: 'static' }
+             |                                 ^",
+               "stack": [
+                 "unstable_instant app/suspense-in-root/static/route-group-config-with-deeper-segment/(group)/layout.tsx (3:33)",
+                 "Set.forEach <anonymous>",
+               ],
+             },
+           ],
+           "code": "E1078",
+           "description": "Runtime data was accessed outside of <Suspense>
+
+         This delays the entire page from rendering, resulting in a slow user experience. Next.js uses this error to ensure your app loads instantly on every navigation. cookies(), headers(), and searchParams, are examples of Runtime data that can only come from a user request.
+
+         To fix this:
+
+         Provide a fallback UI using <Suspense> around this component.
+
+         or
+
+         Move the Runtime data access into a deeper component wrapped in <Suspense>.
+
+         In either case this allows Next.js to stream its contents to the user when they request the page, while still providing an initial UI that is prerendered and prefetchable for instant navigations.
+
+         Learn more: https://nextjs.org/docs/messages/blocking-route",
+           "environmentLabel": "Server",
+           "label": "Blocking Route",
+           "source": "app/suspense-in-root/static/route-group-config-with-deeper-segment/(group)/inner/page.tsx (4:16) @ Page
+         > 4 |   await cookies()
+             |                ^",
+           "stack": [
+             "Page app/suspense-in-root/static/route-group-config-with-deeper-segment/(group)/inner/page.tsx (4:16)",
+           ],
+         }
+        `)
+      })
+
+      it('invalid - config on segment layout inside route group - cookies() blocks below', async () => {
+        const browser = await navigateTo(
+          '/suspense-in-root/static/route-group-deeper-segment-config/inner'
+        )
+        await expect(browser).toDisplayCollapsedRedbox(`
+         {
+           "cause": [
+             {
+               "label": "Caused by: Instant Validation",
+               "source": "app/suspense-in-root/static/route-group-deeper-segment-config/(group)/inner/layout.tsx (3:33) @ unstable_instant
+         > 3 | export const unstable_instant = { prefetch: 'static' }
+             |                                 ^",
+               "stack": [
+                 "unstable_instant app/suspense-in-root/static/route-group-deeper-segment-config/(group)/inner/layout.tsx (3:33)",
+                 "Set.forEach <anonymous>",
+               ],
+             },
+           ],
+           "code": "E1078",
+           "description": "Runtime data was accessed outside of <Suspense>
+
+         This delays the entire page from rendering, resulting in a slow user experience. Next.js uses this error to ensure your app loads instantly on every navigation. cookies(), headers(), and searchParams, are examples of Runtime data that can only come from a user request.
+
+         To fix this:
+
+         Provide a fallback UI using <Suspense> around this component.
+
+         or
+
+         Move the Runtime data access into a deeper component wrapped in <Suspense>.
+
+         In either case this allows Next.js to stream its contents to the user when they request the page, while still providing an initial UI that is prerendered and prefetchable for instant navigations.
+
+         Learn more: https://nextjs.org/docs/messages/blocking-route",
+           "environmentLabel": "Server",
+           "label": "Blocking Route",
+           "source": "app/suspense-in-root/static/route-group-deeper-segment-config/(group)/inner/page.tsx (4:16) @ Page
+         > 4 |   await cookies()
+             |                ^",
+           "stack": [
+             "Page app/suspense-in-root/static/route-group-deeper-segment-config/(group)/inner/page.tsx (4:16)",
+           ],
+         }
+        `)
+      })
+    })
+
+    describe('route group shared boundary', () => {
+      // When navigating from /foo to /, (outer)/layout is shared — its
+      // Suspense doesn't apply to the new tree. (inner)/layout awaits
+      // cookies() without its own Suspense, so the navigation should
+      // block and produce a validation error. However, the depth-based
+      // validation treats both (outer) and (inner) as new at the same
+      // URL depth, so (outer)'s Suspense appears to cover (inner) and
+      // the error is missed.
+      it.failing(
+        'invalid - route group boundary is shared but validation treats it as new',
+        async () => {
+          // Navigate to /foo first
+          const browser = await next.browser(
+            '/suspense-in-root/static/route-group-shared-boundary/foo'
+          )
+          await browser.elementByCss('main')
+
+          // Client-navigate to the index page where (inner)/layout blocks
+          await browser
+            .elementByCss(
+              'a[href="/suspense-in-root/static/route-group-shared-boundary"]'
+            )
+            .click()
+
+          await retry(async () => {
+            expect(await browser.url()).toContain(
+              '/suspense-in-root/static/route-group-shared-boundary'
+            )
+            expect(await browser.url()).not.toContain('/foo')
+          })
+
+          // We expect a redbox because (inner)/layout blocks without
+          // Suspense in the new tree. This assertion will fail until
+          // the validation algorithm accounts for route group boundaries.
+          await expect(browser).toDisplayCollapsedRedbox(
+            'Replace this snapshot once we get this test to pass by erroring'
+          )
+        }
+      )
+    })
+
     describe('disabling validation', () => {
       it('in a layout', async () => {
         const browser = await navigateTo(
