@@ -793,13 +793,14 @@ async function generateStagedDynamicFlightRenderResult(
   const selectStaleTime = createSelectStaleTime(experimental)
   const staleTimeIterable = new StaleTimeIterable()
 
+  // TODO(cached-navs): this assumes that we checked during build that there's no sync IO.
+  // but it can happen e.g. after a revalidation or conditionally for a param that wasn't prerendered.
+  // we should change this to track sync IO, log an error and advance to dynamic.
+  const shouldTrackSyncIO = false
   const stageController = new StagedRenderingController(
     null, // no aborting
     null, // no abandoning
-    // TODO(cached-navs): this assumes that we checked during build that there's no sync IO.
-    // but it can happen e.g. after a revalidation or conditionally for a param that wasn't prerendered.
-    // we should change this to track sync IO, log an error and abandon (i.e. advance to dynamic)
-    false // do not track sync IO
+    shouldTrackSyncIO
   )
 
   // Initialize stale time tracking on the request store.
@@ -3033,7 +3034,15 @@ async function renderToStream(
         const selectStaleTime = createSelectStaleTime(experimental)
         const staleTimeIterable = new StaleTimeIterable()
 
-        const stageController = new StagedRenderingController()
+        // TODO(cached-navs): this assumes that we checked during build that there's no sync IO.
+        // but it can happen e.g. after a revalidation or conditionally for a param that wasn't prerendered.
+        // we should change this to track sync IO, log an error and advance to dynamic.
+        const shouldTrackSyncIO = false
+        const stageController = new StagedRenderingController(
+          null, // no aborting
+          null, // no abandoning
+          shouldTrackSyncIO
+        )
 
         requestStore.stale = INFINITE_CACHE
         requestStore.stagedRendering = stageController
@@ -5156,7 +5165,7 @@ async function validateInstantConfigInBuildWithSample(
             getRSCPayload,
             loaderTree,
             validationCtx,
-            false
+            { is404: false }
           ),
         (err) => {
           // TODO(instant-validation-build): do something more sensible here?
