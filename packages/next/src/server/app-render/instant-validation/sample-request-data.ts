@@ -1,4 +1,4 @@
-import type { RuntimeSample } from '../../../build/segment-config/app/app-segment-config'
+import type { InstantSample } from '../../../build/segment-config/app/app-segment-config'
 import type { ReadonlyRequestCookies } from '../../web/spec-extension/adapters/request-cookies'
 import type { ReadonlyHeaders } from '../../web/spec-extension/adapters/headers'
 import type { DraftModeProvider } from '../../async-storage/draft-mode-provider'
@@ -10,6 +10,7 @@ import { HeadersAdapter } from '../../web/spec-extension/adapters/headers'
 import type { SearchParams } from '../../request/search-params'
 import { getSegmentParam } from '../../../shared/lib/router/utils/get-segment-param'
 import { parseRelativeUrl } from '../../../shared/lib/router/utils/parse-relative-url'
+import { InvariantError } from '../../../shared/lib/invariant-error'
 
 const EXHAUSTIVE_SAMPLES_ERROR_DIGEST =
   'INSTANT_VALIDATION_EXHAUSTIVE_SAMPLES_ERROR'
@@ -45,36 +46,26 @@ function createExhaustiveError(
  * Cookies with `value: null` are declared (allowed to access) but return no value.
  */
 export function createCookiesFromSample(
-  sampleCookies: NonNullable<RuntimeSample['cookies']>,
+  sampleCookies: NonNullable<InstantSample['cookies']>,
   route: string
 ): ReadonlyRequestCookies {
-  // Build a Cookie header string from non-null sample cookies
-  const cookieHeaderParts: string[] = []
   const declaredNames = new Set<string>()
 
-  // TODO(instant-validation-build): this is weird. we should just use cookies.set(), which would also avoid escaping issues (the user sets what they expect to see).
-  // we should also backfill a `cookie` header in `headers()`.
+  const cookies = new RequestCookies(new Headers())
   for (const cookie of sampleCookies) {
     declaredNames.add(cookie.name)
     if (cookie.value !== null) {
-      cookieHeaderParts.push(`${cookie.name}=${cookie.value}`)
+      cookies.set(cookie.name, cookie.value)
     }
   }
 
-  const cookieHeader = cookieHeaderParts.join('; ')
-  const headers = new Headers()
-  if (cookieHeader) {
-    headers.set('cookie', cookieHeader)
-  }
-  const requestCookies = new RequestCookies(headers)
-  const sealed = RequestCookiesAdapter.seal(requestCookies)
+  const sealed = RequestCookiesAdapter.seal(cookies)
 
-  // Wrap with exhaustive proxy
   return new Proxy(sealed, {
     get(target, prop, receiver) {
-      if (prop === 'get' || prop === 'has') {
-        const originalMethod = Reflect.get(target, prop, receiver) as Function
-        return function (name: string) {
+      if (prop === 'has') {
+        const originalMethod = Reflect.get(target, prop, receiver)
+        const wrappedMethod: typeof originalMethod = function (name) {
           if (!declaredNames.has(name)) {
             throw createExhaustiveError(
               route,
@@ -86,7 +77,42 @@ export function createCookiesFromSample(
           }
           return originalMethod.call(target, name)
         }
+        return wrappedMethod
       }
+      if (prop === 'get') {
+        const originalMethod = Reflect.get(target, prop, receiver)
+        const wrappedMethod: typeof originalMethod = function (nameOrCookie) {
+          let name: string
+          if (typeof nameOrCookie === 'string') {
+            name = nameOrCookie
+          } else if (
+            nameOrCookie &&
+            typeof nameOrCookie === 'object' &&
+            typeof nameOrCookie.name === 'string'
+          ) {
+            name = nameOrCookie.name
+          } else {
+            // This is an invalid input. Pass it through to the original method so it can error.
+            return originalMethod.call(target, nameOrCookie)
+          }
+
+          if (!declaredNames.has(name)) {
+            throw createExhaustiveError(
+              route,
+              'cookie',
+              name,
+              'cookies',
+              `\`{ name: "${name}", value: null }\``
+            )
+          }
+          return originalMethod.call(target, name)
+        }
+        return wrappedMethod
+      }
+
+      // TODO(instant-validation-build): what should getAll do?
+      // Maybe we should only allow it if there's an array (possibly empty?)
+
       return Reflect.get(target, prop, receiver)
     },
   })
@@ -98,7 +124,7 @@ export function createCookiesFromSample(
  * Headers with `value: null` are declared (allowed to access) but return null.
  */
 export function createHeadersFromSample(
-  sampleHeaders: NonNullable<RuntimeSample['headers']>,
+  sampleHeaders: NonNullable<InstantSample['headers']>,
   route: string
 ): ReadonlyHeaders {
   const declaredNames = new Set<string>()
@@ -275,8 +301,8 @@ export function createExhaustiveURLSearchParams<T extends URLSearchParams>(
 
 export function createRelativeURLFromSamples(
   route: string,
-  sampleParams: RuntimeSample['params'],
-  sampleSearchParams: RuntimeSample['searchParams']
+  sampleParams: InstantSample['params'],
+  sampleSearchParams: InstantSample['searchParams']
 ) {
   // Build searchParams query object and URL search string from sample
   // TODO(instant-validation-build): it feels like this should happen higher up
@@ -298,7 +324,7 @@ export function createRelativeURLFromSamples(
 }
 
 function createURLSearchParamsFromSample(
-  sampleSearchParams: NonNullable<RuntimeSample['searchParams']>
+  sampleSearchParams: NonNullable<InstantSample['searchParams']>
 ) {
   const result = new URLSearchParams()
   for (const [key, value] of Object.entries(sampleSearchParams)) {
@@ -328,8 +354,13 @@ function createPathnameFromRouteAndSampleParams(route: string, params: Params) {
       switch (param.paramType) {
         case 'catchall':
         case 'optional-catchall': {
-          const paramValue = params[param.paramName]
-          if (!Array.isArray(paramValue)) {
+          let paramValue = params[param.paramName]
+          if (paramValue === undefined) {
+            // The value for the param was not provided. `usePathname` will detect this and throw
+            // before this can surface to userspace. Use `[...NAME]` as a placeholder for the param value
+            // in case it pops up somewhere unexpectedly.
+            paramValue = [rawSegment]
+          } else if (!Array.isArray(paramValue)) {
             throw new Error(
               `Expected sample param value for segment '${rawSegment}' to be an array of strings, got ${typeof paramValue}`
             )
@@ -340,10 +371,15 @@ function createPathnameFromRouteAndSampleParams(route: string, params: Params) {
           break
         }
         case 'dynamic': {
-          const paramValue = params[param.paramName]
-          if (typeof paramValue !== 'string') {
+          let paramValue = params[param.paramName]
+          if (paramValue === undefined) {
+            // The value for the param was not provided. `usePathname` will detect this and throw
+            // before this can surface to userspace. Use `[NAME]` as a placeholder for the param value
+            // in case it pops up somewhere unexpectedly.
+            paramValue = rawSegment
+          } else if (typeof paramValue !== 'string') {
             throw new Error(
-              `Expected sample param value for segment '${rawSegment}' to a string, got ${typeof paramValue}`
+              `Expected sample param value for segment '${rawSegment}' to be a string, got ${typeof paramValue}`
             )
           }
           interpolatedSegments.push(encodeURIComponent(paramValue))
@@ -358,7 +394,9 @@ function createPathnameFromRouteAndSampleParams(route: string, params: Params) {
         case 'dynamic-intercepted-(..)':
         case 'dynamic-intercepted-(...)': {
           // TODO(instant-validation-build): i don't know how these are supposed to work, or if we can even get them here
-          throw new Error('Not implemented: Validation of interception routes')
+          throw new InvariantError(
+            'Not implemented: Validation of interception routes'
+          )
         }
         default: {
           param.paramType satisfies never

@@ -214,7 +214,6 @@ import { HTML_CONTENT_TYPE_HEADER, INFINITE_CACHE } from '../../lib/constants'
 import { createComponentStylesAndScripts } from './create-component-styles-and-scripts'
 import { parseLoaderTree } from '../../shared/lib/router/utils/parse-loader-tree'
 import {
-  clonePrerenderResumeDataCache,
   createPrerenderResumeDataCache,
   createRenderResumeDataCache,
   type PrerenderResumeDataCache,
@@ -246,6 +245,7 @@ import {
   anySegmentHasRuntimePrefetchEnabled,
   isPageAllowedToBlock,
   anySegmentNeedsInstantValidation,
+  resolveInstantConfigSamplesForPage,
 } from './instant-validation/instant-config'
 import { warnOnce } from '../../shared/lib/utils/warn-once'
 import {
@@ -257,7 +257,7 @@ import { createNodeStreamWithLateRelease } from './instant-validation/stream-uti
 // NOTE: Only use this for types, access implementations via ComponentMod
 import type * as InstantValidation from './instant-validation/instant-validation'
 import { createValidationBoundaryTracking } from './instant-validation/boundary-tracking'
-import type { RuntimeSample } from '../../build/segment-config/app/app-segment-config'
+import type { InstantSample } from '../../build/segment-config/app/app-segment-config'
 import { ResponseCookies } from '../web/spec-extension/cookies'
 
 export type GetDynamicParamFromSegment = (
@@ -2369,7 +2369,37 @@ async function renderToHTMLOrFlightImpl(
     }
 
     const streamString = await streamToString(response.stream)
-    return new RenderResult(streamString, options)
+    const result = new RenderResult(streamString, options)
+
+    // Run build-time instant validation if the page has instant configs
+    // TODO(instant-validation-build): This is not a great place to wire this in.
+    if (
+      workStore.cacheComponentsEnabled &&
+      workStore.isBuildTimePrerendering &&
+      (await anySegmentNeedsInstantValidation(loaderTree))
+    ) {
+      let instantValidationPassed: boolean
+      try {
+        instantValidationPassed = await workAsyncStorage.exit(() =>
+          validateInstantConfigsInBuild(
+            ctx,
+            response.renderResumeDataCache ?? null
+          )
+        )
+      } catch (err) {
+        throw new InvariantError(
+          'An unexpected error occcured during instant validation',
+          { cause: err }
+        )
+      }
+      if (!instantValidationPassed) {
+        throw new StaticGenBailoutError(
+          'Stopping prerender due to instant validation errors.'
+        )
+      }
+    }
+
+    return result
   } else {
     // We're rendering dynamically
     const renderResumeDataCache =
@@ -4061,7 +4091,7 @@ async function spawnStaticShellValidationInDevImpl(
   // First we warmup SSR with the runtime chunks. This ensures that when we do
   // the full prerender pass with dynamic tracking module loading won't
   // interrupt the prerender and can properly observe the entire content
-  await warmupClientModulesForStagedValidationInDev(
+  await warmupClientModulesForStagedValidation(
     // if we're going to be validating prefetches, we'll be rendering some segments in the dynamic stage.
     // otherwise, for static shell validation, we only need to warm up to the runtime stage.
     // we also need to use a different store type, because instant validation allows more APIs to resolve.
@@ -4135,7 +4165,7 @@ async function spawnStaticShellValidationInDevImpl(
   }
 }
 
-async function warmupClientModulesForStagedValidationInDev(
+async function warmupClientModulesForStagedValidation(
   storeType: PrerenderStoreModernClient['type'] | ValidationStoreClient['type'],
   partialServerChunks: Array<Uint8Array>,
   allServerChunks: Array<Uint8Array>,
@@ -4484,7 +4514,7 @@ async function validateInstantConfigs(
     process.env.NEXT_PRIVATE_DEBUG_VALIDATION === '1' ? console.log : undefined
 
   const { findNavigationsToValidate, collectStagedSegmentData } =
-    ctx.componentMod.InstantValidation!
+    ctx.componentMod.InstantValidation()!
 
   debug?.('\nStarting instant validation...')
 
@@ -4618,7 +4648,7 @@ async function renderWithRestartOnCacheMissInValidation(
   createRequestStore: () => RequestStore,
   getPayload: (requestStore: RequestStore) => Promise<RSCPayload>,
   onError: (error: unknown) => void,
-  prefilledDataCache: PrerenderResumeDataCache
+  prefilledDataCache: RenderResumeDataCache | null
 ): Promise<{
   accumulatedChunksPromise: Promise<AccumulatedStreamChunks>
   startTime: number
@@ -4652,8 +4682,9 @@ async function renderWithRestartOnCacheMissInValidation(
   const cacheSignal = new CacheSignal()
   trackPendingModules(cacheSignal)
 
-  const prerenderResumeDataCache =
-    clonePrerenderResumeDataCache(prefilledDataCache)
+  const prerenderResumeDataCache = prefilledDataCache
+    ? createPrerenderResumeDataCache(prefilledDataCache)
+    : createPrerenderResumeDataCache()
 
   const initialReactController = new AbortController()
   const initialDataController = new AbortController()
@@ -4853,6 +4884,32 @@ async function renderWithRestartOnCacheMissInValidation(
   }
 }
 
+async function validateInstantConfigsInBuild(
+  ctx: AppRenderContext,
+  prefilledDataCache: RenderResumeDataCache | null
+): Promise<boolean> {
+  if (process.env.__NEXT_TEST_MODE && process.env.NEXT_TEST_LOG_VALIDATION) {
+    const requestId = Date.now()
+    const route = ctx.workStore.route
+    console.log(
+      '<VALIDATION_MESSAGE>' +
+        JSON.stringify({ type: 'validation_start', requestId, url: route }) +
+        '</VALIDATION_MESSAGE>'
+    )
+    try {
+      return await validateInstantConfigsInBuildImpl(ctx, prefilledDataCache)
+    } finally {
+      console.log(
+        '<VALIDATION_MESSAGE>' +
+          JSON.stringify({ type: 'validation_end', requestId, url: route }) +
+          '</VALIDATION_MESSAGE>'
+      )
+    }
+  } else {
+    return await validateInstantConfigsInBuildImpl(ctx, prefilledDataCache)
+  }
+}
+
 /**
  * Runs instant validation at build time using the `samples` from `unstable_instant`.
  *
@@ -4860,39 +4917,74 @@ async function renderWithRestartOnCacheMissInValidation(
  * populated from sample data, then feeds the accumulated chunks to
  * `validateInstantConfigs` which handles the actual validation.
  */
-async function validateInstantConfigsInBuild(
-  tree: LoaderTree,
+async function validateInstantConfigsInBuildImpl(
   ctx: AppRenderContext,
-  prefilledDataCache: PrerenderResumeDataCache
+  prefilledDataCache: RenderResumeDataCache | null
 ): Promise<boolean> {
-  const { workStore } = ctx
-  const route = workStore.route
+  const debug =
+    process.env.NEXT_PRIVATE_DEBUG_VALIDATION === '1' ? console.log : undefined
 
-  const requestId = Date.now()
-  if (process.env.__NEXT_TEST_MODE && process.env.NEXT_TEST_LOG_VALIDATION) {
-    console.log(
-      '<VALIDATION_MESSAGE>' +
-        JSON.stringify({ type: 'validation_start', requestId, url: route }) +
-        '</VALIDATION_MESSAGE>'
+  const { workStore: outerWorkStore } = ctx
+  const route = outerWorkStore.route
+
+  const loaderTree = ctx.componentMod.routeModule.userland.loaderTree
+  let samples = await resolveInstantConfigSamplesForPage(loaderTree)
+  if (!samples || samples.length === 0) {
+    // No samples defined; use a single empty sample to still run validation
+    samples = [{}]
+  }
+  debug?.('Resolved samples:', samples)
+
+  const allPossibleFallbackRouteParams = getFallbackRouteParams(
+    route,
+    ctx.componentMod.routeModule
+  )
+
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
+    const sample = samples[sampleIndex]
+    debug?.(`Validating sample (${sampleIndex + 1}/${samples.length}):`, sample)
+    const errors = await validateInstantConfigInBuildWithSample(
+      ctx,
+      sample,
+      allPossibleFallbackRouteParams,
+      prefilledDataCache
     )
-  }
-  using _ = {
-    [Symbol.dispose]() {
-      if (
-        process.env.__NEXT_TEST_MODE &&
-        process.env.NEXT_TEST_LOG_VALIDATION
-      ) {
-        console.log(
-          '<VALIDATION_MESSAGE>' +
-            JSON.stringify({ type: 'validation_end', requestId, url: route }) +
-            '</VALIDATION_MESSAGE>'
-        )
+    if (errors.length > 0) {
+      debug?.(`❌ Sample failed validation (${errors.length} errors)`)
+      const sampleDesc =
+        samples.length > 1
+          ? ` (sample ${sampleIndex + 1} of ${samples.length})`
+          : ''
+      for (const err of errors) {
+        console.error(err)
       }
-    },
+      console.error(
+        `Build-time instant validation failed for route "${route}"${sampleDesc}.`
+      )
+      return false
+    } else {
+      debug?.('✅ Sample validated successfully')
+    }
   }
+  return true
+}
 
-  const { findSegmentsWithInstantConfig } =
-    require('./instant-validation/instant-config') as typeof import('./instant-validation/instant-config')
+async function validateInstantConfigInBuildWithSample(
+  outerCtx: AppRenderContext,
+  sample: InstantSample,
+  allPossibleFallbackRouteParams: OpaqueFallbackRouteParams | null,
+  prefilledDataCache: RenderResumeDataCache | null
+): Promise<unknown[]> {
+  // The flow for build mirrors what we do when validating in dev.
+  // We have to perform a full dynamic render to get the RSC chunks for each stage.
+  // In order to do that, we have to set up a mock AppRenderContext, workStore, and requestStore
+  // based on the `sample` we're using.
+
+  const { workStore: outerWorkStore } = outerCtx
+
+  const loaderTree = outerCtx.componentMod.routeModule.userland.loaderTree
+  const route = outerWorkStore.route
+
   const {
     createCookiesFromSample,
     createHeadersFromSample,
@@ -4901,83 +4993,101 @@ async function validateInstantConfigsInBuild(
   } =
     require('./instant-validation/sample-request-data') as typeof import('./instant-validation/sample-request-data')
 
-  // Find all segments with instant configs to extract samples
-  const segmentsWithConfigs = await findSegmentsWithInstantConfig(tree)
-
-  // Collect all samples from all segments with instant configs
-  let allSamples: RuntimeSample[] = []
-  for (const { config } of segmentsWithConfigs) {
-    if (typeof config === 'object' && config.samples) {
-      allSamples = config.samples
-      // FIXME(instant-validation-build) - this isn't the innermost segment. we should probably grab this in findNavigationsToValidate. parallel routes unclear as usual
-      break // Use the first segment's samples (pages only for now)
-    }
-  }
-
-  if (allSamples.length === 0) {
-    // No samples defined; use a single empty sample to still run validation
-    allSamples = [{}]
-  }
-
-  const allFallbackRouteParams = getFallbackRouteParams(
-    workStore.page,
-    ctx.componentMod.routeModule
+  // TODO(instant-validation-build): it feels like this should happen higher up
+  // and go through existing URL parsing/generation logic?
+  const sampleUrl = createRelativeURLFromSamples(
+    route,
+    sample.params,
+    sample.searchParams
   )
 
-  for (let sampleIndex = 0; sampleIndex < allSamples.length; sampleIndex++) {
-    const sample = allSamples[sampleIndex]
-
-    // Create exhaustive request data from sample
-    const sampleCookies = createCookiesFromSample(sample.cookies ?? [], route)
-    // FIXME(instant-validation-build): mutable cookies should probably mirror the request cookies?
-    const mutableCookies = new ResponseCookies(new Headers())
-    const userspaceMutableCookies = new ResponseCookies(new Headers())
-    const sampleHeaders = createHeadersFromSample(sample.headers ?? [], route)
-    const draftMode = createDraftModeForValidation()
-
-    // TODO(instant-validation-build): it feels like this should happen higher up
-    // and go through existing URL parsing/generation logic?
-    const sampleUrl = createRelativeURLFromSamples(
-      route,
-      sample.params,
-      sample.searchParams
-    )
-
-    const sampleParams = sample.params ?? {}
-    let fallbackRouteParams: OpaqueFallbackRouteParams | null = null
-    if (allFallbackRouteParams) {
-      const fallbackRouteParamsMut = new Map()
-      for (const [paramKey, value] of allFallbackRouteParams) {
-        if (!(paramKey in sampleParams)) {
-          fallbackRouteParamsMut.set(paramKey, value)
-        }
+  const sampleParams = sample.params ?? {}
+  let fallbackRouteParams: OpaqueFallbackRouteParams | null = null
+  if (allPossibleFallbackRouteParams) {
+    const fallbackRouteParamsMut = new Map()
+    for (const [paramKey, value] of allPossibleFallbackRouteParams) {
+      if (!(paramKey in sampleParams)) {
+        fallbackRouteParamsMut.set(paramKey, value)
       }
-      fallbackRouteParams = fallbackRouteParamsMut
     }
+    fallbackRouteParams = fallbackRouteParamsMut
+  }
 
-    const getDynamicParamFromSegment = makeGetDynamicParamFromSegment(
-      sampleParams,
-      fallbackRouteParams,
-      false
-    )
-    const sampleRootParams = getRootParams(
-      ctx.componentMod.routeModule.userland.loaderTree,
-      getDynamicParamFromSegment
-    )
+  const getDynamicParamFromSegment = makeGetDynamicParamFromSegment(
+    sampleParams,
+    fallbackRouteParams,
+    false
+  )
+  const sampleRootParams = getRootParams(loaderTree, getDynamicParamFromSegment)
 
-    let sampleUrlWithoutQuery: Omit<ParsedRelativeUrl, 'query'>
-    let sampleQuery: ParsedRelativeUrl['query']
-    ;({ query: sampleQuery, ...sampleUrlWithoutQuery } = sampleUrl)
+  let sampleUrlWithoutQuery: Omit<ParsedRelativeUrl, 'query'>
+  let sampleQuery: ParsedRelativeUrl['query']
+  ;({ query: sampleQuery, ...sampleUrlWithoutQuery } = sampleUrl)
 
-    // TODO(instant-validation-build):
-    // this makes me feel that this is the wrong place to do this.
-    // i'm wondering if we should also set up a new workStore. isStaticGeneration should not be true here.
+  const { AfterContext } =
+    require('../after/after-context') as typeof import('../after/after-context')
+
+  // NOTE: Matching the field order in `createWorkStore` to avoid deopting.
+  const workStore: WorkStore = {
+    isStaticGeneration: false,
+    page: outerWorkStore.page,
+    route: outerWorkStore.route,
+    incrementalCache: outerWorkStore.incrementalCache,
+    cacheLifeProfiles: outerWorkStore.cacheLifeProfiles,
+    isBuildTimePrerendering: false,
+    fetchCache: outerWorkStore.fetchCache,
+    isOnDemandRevalidate: false,
+
+    isDraftMode: false,
+
+    isPrefetchRequest: false,
+    buildId: outerWorkStore.buildId,
+    reactLoadableManifest: outerWorkStore.reactLoadableManifest,
+    assetPrefix: outerWorkStore.assetPrefix,
+    nonce: outerWorkStore.nonce,
+
+    // Never run `after()` for this validation render. by definition, `after` can't affect the rendered output.
+    afterContext: new AfterContext({
+      waitUntil(promise) {
+        promise.catch(() => {})
+      },
+      onClose() {},
+      onTaskError() {},
+    }),
+
+    cacheComponentsEnabled: outerWorkStore.cacheComponentsEnabled,
+    previouslyRevalidatedTags: [],
+    refreshTagsByCacheKind: new Map(),
+    runInCleanSnapshot: outerWorkStore.runInCleanSnapshot,
+    shouldTrackFetchMetrics: false,
+    reactServerErrorsByDigest: new Map(),
+  }
+
+  return workAsyncStorage.run(workStore, async () => {
+    // NOTE: match field order in renderToHTMLOrFlightImpl to avoid deopts
     const validationCtx: AppRenderContext = {
-      ...ctx,
-      interpolatedParams: sampleParams,
+      componentMod: outerCtx.componentMod,
       url: sampleUrlWithoutQuery,
-      query: sampleQuery,
+      renderOpts: outerCtx.renderOpts,
+      workStore,
+      parsedRequestHeaders: outerCtx.parsedRequestHeaders,
       getDynamicParamFromSegment,
+      interpolatedParams: sampleParams,
+      query: sampleQuery,
+      isPrefetch: false,
+      isPossibleServerAction: false,
+      requestTimestamp: outerCtx.requestTimestamp,
+      appUsingSizeAdjustment: outerCtx.appUsingSizeAdjustment,
+      flightRouterState: undefined,
+      requestId: outerCtx.requestId,
+      htmlRequestId: outerCtx.htmlRequestId,
+      pagePath: outerCtx.pagePath,
+      assetPrefix: outerCtx.assetPrefix,
+      isNotFoundPath: outerCtx.isNotFoundPath,
+      nonce: outerCtx.nonce,
+      res: outerCtx.res,
+      sharedContext: outerCtx.sharedContext,
+      implicitTags: outerCtx.implicitTags,
     }
 
     const validationSamples: InstantValidationSamples = {
@@ -4985,31 +5095,55 @@ async function validateInstantConfigsInBuild(
       searchParams: sample.searchParams,
     }
 
-    // Create a synthetic RequestStore for the initial render.
-    // The helper will wire up staged rendering and cache fields.
-    const createRequestStore = (): RequestStore => ({
-      type: 'request',
-      phase: 'render',
-      implicitTags: ctx.implicitTags,
-      url: {
-        pathname: sampleUrl.pathname,
-        search: sampleUrl.search,
-      },
-      headers: sampleHeaders,
-      cookies: sampleCookies,
-      mutableCookies,
-      userspaceMutableCookies,
-      draftMode,
-      rootParams: sampleRootParams,
-      validationSamples,
-      // These will be set by the helper
-      renderResumeDataCache: null,
-      prerenderResumeDataCache: null,
-      stagedRendering: null,
-      asyncApiPromises: undefined,
-    })
+    const createRequestStore = (): RequestStore => {
+      // Create exhaustive request data from sample
+      const sampleCookies = createCookiesFromSample(sample.cookies ?? [], route)
 
-    // Run the two-pass render (restart on cache miss)
+      // We don't have to bother initializing these, pages can't access them anyway,
+      // we just need them because RequestStore requires them.
+      const unusedMutableCookies = new ResponseCookies(new Headers())
+
+      // Create headers. If we have cookie samples, add a `cookie` header to match.
+      // Accessing it will be implicitly allowed by the proxy --
+      // if the user defined some cookies, accessing the "cookie" header is also fine.
+      // TODO(instant-validation-build)
+      const sampleHeadersList = sample.headers ? [...sample.headers] : []
+      if (sampleHeadersList.find(([name]) => name.toLowerCase() === 'cookie')) {
+        // TODO(instant-validation-build): We probably need to make this a special error type and catch it above
+        throw new Error(
+          'Invalid sample: Defining cookies via a "cookie" header is not supported. Use `cookies: [{ name: ..., value: ...}]` instead.'
+        )
+      }
+      if (sample.cookies) {
+        sampleHeadersList.push(['cookie', sampleCookies.toString()])
+      }
+      const sampleHeaders = createHeadersFromSample(sampleHeadersList, route)
+
+      const draftMode = createDraftModeForValidation()
+
+      return {
+        type: 'request',
+        phase: 'render',
+        implicitTags: outerCtx.implicitTags,
+        url: {
+          pathname: sampleUrl.pathname,
+          search: sampleUrl.search,
+        },
+        headers: sampleHeaders,
+        cookies: sampleCookies,
+        mutableCookies: unusedMutableCookies,
+        userspaceMutableCookies: unusedMutableCookies,
+        draftMode,
+        rootParams: sampleRootParams,
+        validationSamples,
+        // These will be set when rendering
+        renderResumeDataCache: null,
+        prerenderResumeDataCache: null,
+        stagedRendering: null,
+        asyncApiPromises: undefined,
+      }
+    }
+
     const renderErrors: Array<unknown> = []
     const { accumulatedChunksPromise, startTime, stageController } =
       await renderWithRestartOnCacheMissInValidation(
@@ -5020,7 +5154,7 @@ async function validateInstantConfigsInBuild(
           workUnitAsyncStorage.run(
             requestStore,
             getRSCPayload,
-            tree,
+            loaderTree,
             validationCtx,
             false
           ),
@@ -5032,35 +5166,32 @@ async function validateInstantConfigsInBuild(
       )
 
     const accumulatedChunks = await accumulatedChunksPromise
-
-    const logFailedValidation = (errors: unknown[]) => {
-      const sampleDesc =
-        allSamples.length > 1
-          ? ` (sample ${sampleIndex + 1} of ${allSamples.length})`
-          : ''
-      for (const err of errors) {
-        console.error(err)
-      }
-      console.error(
-        `Build-time instant validation failed for route "${route}"${sampleDesc}.`
-      )
-    }
+    const debugChunks = null // TODO(instant-validation-build): support debugChannel
 
     // TODO(instant-validation-build): check for exhaustive proxy errors specifically?
     if (
       stageController.currentStage === RenderStage.Abandoned &&
       stageController.syncInterruptReason
     ) {
-      logFailedValidation([stageController.syncInterruptReason])
-      return false
+      return [stageController.syncInterruptReason]
     }
 
     const allowEmptyStaticShell =
       (validationCtx.renderOpts.allowEmptyStaticShell ?? false) ||
-      (await isPageAllowedToBlock(tree))
+      (await isPageAllowedToBlock(loaderTree))
 
-    // Warmup client modules for validation
-    await warmupClientModulesForStagedValidationInDev(
+    // Now we the chunks of a fully rendered page, just like in dev.
+    // We can use them to validate all the navigations required by `instant` configs.
+    // Note that we're not performing static shell validation here -- that happens
+    // implicitly as part of the static prerender.
+
+    // The static prerender has warmed some client modules already,
+    // but we'll be reaching Runtime/Dynamic stages and thus rendering more content,
+    // so we need to warm again.
+    // TODO(instant-validation-build): This might warm too much, possibly hitting errors on code that didn't expect
+    // to run at build time. For example, we generally don't need to render leaf segments (e.g. __PAGE__) in
+    // the Dynamic stage, they're Runtime at best.
+    await warmupClientModulesForStagedValidation(
       'validation-client',
       accumulatedChunks.dynamicChunks,
       accumulatedChunks.dynamicChunks,
@@ -5071,10 +5202,9 @@ async function validateInstantConfigsInBuild(
       validationSamples
     )
 
-    // Run the actual validation using the existing infrastructure
     const errors = await validateInstantConfigs(
       accumulatedChunks,
-      null, // debugChunks
+      debugChunks,
       startTime,
       sampleRootParams,
       fallbackRouteParams,
@@ -5087,11 +5217,10 @@ async function validateInstantConfigsInBuild(
     const allErrors = [...renderErrors, ...errors]
 
     if (allErrors.length > 0) {
-      logFailedValidation(allErrors)
-      return false
+      return allErrors
     }
-  }
-  return true
+    return []
+  })
 }
 
 async function validateInstantConfigNavigation(
@@ -5112,7 +5241,7 @@ async function validateInstantConfigNavigation(
   const { implicitTags, nonce, workStore } = ctx
   const isDebugChannelEnabled = !!ctx.renderOpts.setReactDebugChannel
   const { createCombinedPayload, createCombinedPayloadStream } =
-    ctx.componentMod.InstantValidation!
+    ctx.componentMod.InstantValidation()!
 
   const clientDynamicTracking = createDynamicTrackingState(
     false //isDebugDynamicAccesses
@@ -6074,32 +6203,6 @@ async function prerenderToStream(
         ComponentMod,
         renderOpts
       )
-
-      // Run build-time instant validation if the page has instant configs
-      if (
-        isBuildTimePrerendering &&
-        ComponentMod.InstantValidation &&
-        (await anySegmentNeedsInstantValidation(tree))
-      ) {
-        let instantValidationPassed: boolean
-        try {
-          instantValidationPassed = await validateInstantConfigsInBuild(
-            tree,
-            ctx,
-            prerenderResumeDataCache
-          )
-        } catch (err) {
-          throw new InvariantError(
-            'An unexpected error occcured during instant validation',
-            { cause: err }
-          )
-        }
-        if (!instantValidationPassed) {
-          throw new StaticGenBailoutError(
-            'Stopping prerender due to instant validation errors.'
-          )
-        }
-      }
 
       if (serverIsDynamic) {
         // Dynamic case

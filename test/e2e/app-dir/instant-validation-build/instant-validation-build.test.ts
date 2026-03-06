@@ -215,6 +215,22 @@ describe('instant-validation-build', () => {
     })
   })
 
+  describe('samples precedence', () => {
+    it('page samples override layout samples', async () => {
+      const result = await prerender(
+        '/samples-precedence/[slug]/page-overrides'
+      )
+      expectNoValidationErrors(result)
+      expect(result.cliOutput).not.toContain('AssertionError')
+    })
+
+    it('page inherits samples from layout when it has none', async () => {
+      const result = await prerender('/samples-precedence/[slug]/page-inherits')
+      expectNoValidationErrors(result)
+      expect(result.cliOutput).not.toContain('AssertionError')
+    })
+  })
+
   describe('caches', () => {
     it('valid - static prefetch - awaiting a cache in the static stage does not require a suspense boundary', async () => {
       const result = await prerender(

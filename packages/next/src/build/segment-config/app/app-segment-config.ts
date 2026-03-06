@@ -55,33 +55,33 @@ export type InstantConfigForTypeCheckInternal = __GenericInstantConfig | Instant
 // delete the __GenericPrefetch member.
 interface __GenericInstantConfig {
   prefetch: string
-  samples?: Array<WideRuntimeSample>
+  samples?: Array<WideInstantSample>
   from?: string[]
   unstable_disableValidation?: boolean
 }
 
 interface InstantConfigStatic {
   prefetch: 'static'
-  samples?: Array<RuntimeSample>
+  samples?: Array<InstantSample>
   from?: string[]
   unstable_disableValidation?: boolean
 }
 
 interface InstantConfigRuntime {
   prefetch: 'runtime'
-  samples: Array<RuntimeSample>
+  samples: Array<InstantSample>
   from?: string[]
   unstable_disableValidation?: boolean
 }
 
-type WideRuntimeSample = {
-  cookies?: RuntimeSample['cookies']
+type WideInstantSample = {
+  cookies?: InstantSample['cookies']
   headers?: Array<string[]>
-  params?: RuntimeSample['params']
-  searchParams?: RuntimeSample['searchParams']
+  params?: InstantSample['params']
+  searchParams?: InstantSample['searchParams']
 }
 
-export type RuntimeSample = {
+export type InstantSample = {
   cookies?: Array<{
     name: string
     value: string | null
